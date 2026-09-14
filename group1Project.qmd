@@ -1,0 +1,749 @@
+---
+title: "Multivariate Analysis of Autoimmune Disease Data"
+format: pdf
+editor: visual
+author: Sarah Abebe, Gavin Beach, Daniel Calvac, Sami Hamdalla
+---
+
+## Introduction
+
+Autoimmune diseases are chronic conditions in which the immune system mistakenly attacks the body’s own tissues. They can affect many organs and systems, leading to symptoms such as fatigue, joint pain, inflammation, and organ damage. Because these conditions often look similar to one another and to other illnesses, clinicians rely heavily on blood tests and clinical measures to help with diagnosis and monitoring.
+
+In this project we analyze a publicly available autoimmune disease dataset from Kaggle that contains routine laboratory measurements and demographic information for patients with different autoimmune conditions.
+
+**Main Goal**: understand the structure of the CBC measurements, to model ESR using other clinical variables, and to compare patient groups. More specifically, we address the following questions:
+
+1.  Can a small number of principal components summarize most of the variation in the CBC variables?
+2.  Which demographic and laboratory variables are most strongly related to ESR in a multiple linear regression model?
+3.  Are there multivariate differences in key clinical measurements across different autoimmune diagnoses?
+4.  Do males and females differ in their multivariate clinical profiles?
+
+## Data Cleaning and Preparation
+
+The data for this project come from a publicly available autoimmune disease dataset from Kaggle. Each row represents a patient, and the columns include demographic variables (such as age and gender), clinical diagnoses, and laboratory measurements such as complete blood count (CBC) values and inflammation markers.
+
+Before applying any statistical methods, we performed basic data cleaning:
+
+1\. Imported the data into R and inspected the structure and summary statistics.\
+2. Converted categorical variables (such as Gender and Diagnosis) to factors.\
+3. Removed observations with missing values in key variables needed for our analyses.\
+4. Restricted the data to patients with clearly defined diagnoses and reasonable age values.
+
+------------------------------------------------------------------------
+
+Read in the data
+
+```{r}
+auto_raw <- read.csv("autoimmune.csv")
+```
+
+Inspect structure and basic summaries
+
+```{r}
+str(auto_raw)
+summary(auto_raw)
+```
+
+Select variables we plan to use
+
+```{r}
+keep_vars <- c(
+  "Age",
+  "Gender",
+  "Diagnosis",
+  "Sickness_Duration_Months",
+  "ESR",
+  "CRP",
+  "ANA",
+  "C3",
+  "C4",
+  "RBC_Count",
+  "Hemoglobin",
+  "Hematocrit",
+  "MCV",
+  "MCH",
+  "MCHC",
+  "RDW",
+  "WBC_Count",
+  "PLT_Count",
+  "Neutrophils",
+  "Lymphocytes",
+  "Monocytes",
+  "Eosinophils",
+  "Basophils"
+)
+auto_sel <- auto_raw[ , keep_vars]
+```
+
+Inspect new structure + basic summaries
+
+```{r}
+str(auto_sel)
+summary(auto_sel)
+```
+
+Convert categorical cols to factors
+
+```{r}
+library(dplyr)
+
+# Convert categorical cols to factors
+auto_sel$Gender <- as.factor(auto_sel$Gender)
+auto_sel$Diagnosis <- as.factor(auto_sel$Diagnosis)
+str(auto_sel)
+
+```
+
+------------------------------------------------------------------------
+
+Because the original Diagnosis variable included 116 different disease labels, we also created a grouped diagnosis variable that combines related conditions into a smaller number of clinical categories. This helps simplify plots and improves the stability of our multivariate comparisons later in the report.
+
+```{r}
+Autoimmune_Disorder_Dataset <- auto_sel
+
+Autoimmune_Disorder_Dataset_Grouped <- Autoimmune_Disorder_Dataset %>%
+  mutate(Diagnosis_Group = case_when(
+    
+    # 1. NORMAL/CONTROL GROUP
+    Diagnosis == "Normal" ~ "Normal",
+    
+    # 2. RHEUMATOLOGICAL DISORDERS (joint/connective tissue)
+    Diagnosis %in% c("Rheumatoid arthritis", 
+                     "Systemic Lupus Erythematosus",
+                     "Sjögren syndrome",
+                     "Scleroderma (systemic sclerosis)",
+                     "Polymyalgia rheumatica",
+                     "Polymyositis",
+                     "Dermatomyositis",
+                     "Myositis",
+                     "Inclusion body myositis",
+                     "Fibromyalgia",
+                     "Undifferentiated connective tissue disease (UCTD)",
+                     "Discoid lupus erythematosus",
+                     "Lupus nephritis",
+                     "Lupus vasculitis",
+                     "Rheumatoid lung disease",
+                     "Rheumatoid vasculitis") ~ "Rheumatological",
+    
+    # 3. NEUROLOGICAL DISORDERS
+    Diagnosis %in% c("Multiple sclerosis",
+                     "Myasthenia gravis",
+                     "Guillain-Barré syndrome",
+                     "Neuromyelitis optica",
+                     "Neuromyelitis optica (Devic's disease)/NMOSD",
+                     "Chronic inflammatory demyelinating polyneuropathy",
+                     "Lambert–Eaton myasthenic syndrome",
+                     "Autoimmune encephalitis",
+                     "Anti-NMDA receptor encephalitis",
+                     "Hashimoto's encephalopathy",
+                     "Acute disseminated encephalomyelitis",
+                     "Balo concentric sclerosis",
+                     "Idiopathic inflammatory demyelinating diseases",
+                     "Bickerstaff's encephalitis",
+                     "Optic neuritis",
+                     "Transverse myelitis",
+                     "Acute motor axonal neuropathy",
+                     "Stiff-person syndrome",
+                     "Neuromyotonia",
+                     "Paraneoplastic cerebellar degeneration",
+                     "Opsoclonus myoclonus syndrome",
+                     "Sydenham's chorea",
+                     "Restless legs syndrome") ~ "Neurological",
+    
+    # 4. ENDOCRINE/METABOLIC DISORDERS
+    Diagnosis %in% c("Graves' disease",
+                     "Hashimoto's thyroiditis",
+                     "Ord's thyroiditis",
+                     "Graves' ophthalmopathy",
+                     "Diabetes mellitus type 1",
+                     "Addison's disease",
+                     "Autoimmune polyendocrine syndrome type 1 (APS1)",
+                     "Autoimmune polyendocrine syndrome type 2 (APS2)",
+                     "Autoimmune polyendocrine syndrome type 3 (APS3)",
+                     "Autoimmune oophoritis",
+                     "Autoimmune orchitis",
+                     "Premature ovarian failure",
+                     "Autoimmune progesterone dermatitis") ~ "Endocrine",
+    
+    # 5. GASTROINTESTINAL DISORDERS
+    Diagnosis %in% c("Crohn's disease",
+                     "Ulcerative colitis",
+                     "Celiac disease",
+                     "Autoimmune hepatitis",
+                     "Primary sclerosing cholangitis",
+                     "Autoimmune pancreatitis",
+                     "Autoimmune enteropathy",
+                     "Pernicious anemia") ~ "Gastrointestinal",
+    
+    # 6. DERMATOLOGICAL DISORDERS (skin)
+    Diagnosis %in% c("Psoriasis",
+                     "Vitiligo",
+                     "Alopecia areata",
+                     "Pemphigus vulgaris",
+                     "Bullous pemphigoid",
+                     "Cicatricial pemphigoid",
+                     "Gestational pemphigoid",
+                     "Dermatitis herpetiformis",
+                     "Epidermolysis bullosa acquisita",
+                     "Linear IgA disease",
+                     "Lichen planus",
+                     "Lichen sclerosus",
+                     "Morphea",
+                     "Hidradenitis suppurativa",
+                     "Erythema nodosum",
+                     "Autoimmune urticaria",
+                     "Urticarial vasculitis") ~ "Dermatological",
+    
+    # 7. VASCULITIS & VASCULAR DISORDERS
+    Diagnosis %in% c("Behçet's disease",
+                     "Giant cell arteritis",
+                     "Takayasu's arteritis",
+                     "Granulomatosis with polyangiitis (GPA)",
+                     "Eosinophilic granulomatosis with polyangiitis (EGPA)",
+                     "Microscopic polyangiitis (MPA)",
+                     "Polyarteritis nodosa (PAN)",
+                     "IgA vasculitis (IgAV)",
+                     "Leukocytoclastic vasculitis",
+                     "Vasculitis",
+                     "Kawasaki disease",
+                     "Antiphospholipid syndrome",
+                     "Rheumatic heart disease") ~ "Vasculitis",
+    
+    # 8. HEMATOLOGICAL & OTHER ORGAN-SPECIFIC DISORDERS
+    Diagnosis %in% c("Autoimmune hemolytic anemia",
+                     "Immune thrombocytopenia",
+                     "Thrombotic thrombocytopenic purpura",
+                     "Paroxysmal nocturnal hemoglobinuria",
+                     "Goodpasture syndrome",
+                     "IgA nephropathy",
+                     "Membranous nephropathy",
+                     "Interstitial nephritis",
+                     "Idiopathic pulmonary fibrosis",
+                     "Interstitial lung disease",
+                     "Pulmonary alveolar proteinosis",
+                     "Sarcoidosis",
+                     "Autoimmune uveitis",
+                     "Intermediate uveitis",
+                     "Autoimmune retinopathy",
+                     "Sympathetic ophthalmia",
+                     "Mooren's ulcer",
+                     "Scleritis",
+                     "Ligneous conjunctivitis",
+                     "Cogan syndrome",
+                     "Susac's syndrome",
+                     "Tolosa–Hunt syndrome",
+                     "Interstitial cystitis",
+                     "Endometriosis",
+                     "Autoimmune angioedema") ~ "Hematological_OrganSpecific",
+    
+    # Catch any that might have been missed
+    TRUE ~ "Other"
+  ))
+
+# Copy the grouped variable back into auto_clean so we keep using that
+auto_sel$Diagnosis_Group <- Autoimmune_Disorder_Dataset_Grouped$Diagnosis_Group
+auto_sel$Diagnosis_Group <- as.factor(auto_sel$Diagnosis_Group)
+
+# Look at sample sizes
+table(auto_sel$Diagnosis_Group)
+
+head(auto_sel)
+```
+
+## Principal Component Analysis (PCA)
+
+After cleaning and grouping the data, we focused on the Complete Blood Count (CBC) panel, which consists of 14 interrelated measurements. Because these variables are often highly correlated with one another, we used Principal Component Analysis (PCA) to reduce the dimensionality while retaining most of the variation in the hematological profiles.
+
+------------------------------------------------------------------------
+
+Select CBC variables for PCA
+
+```{r}
+cbc_vars <- c("RBC_Count", "Hemoglobin", "Hematocrit", "MCV", "MCH", 
+              "MCHC", "RDW", "WBC_Count", "PLT_Count", "Neutrophils", 
+              "Lymphocytes", "Monocytes", "Eosinophils", "Basophils")
+```
+
+Remove rows with missing CBC data
+
+```{r}
+auto_pca <- auto_sel[complete.cases(auto_sel[, cbc_vars]), ]
+```
+
+Perform PCA
+
+```{r}
+pca_result <- prcomp(auto_pca[, cbc_vars], scale. = TRUE)
+```
+
+------------------------------------------------------------------------
+
+Summary of PCA
+
+```{r}
+summary(pca_result)
+```
+
+The PCA summary shows that the first principal component captures 16.25% of the total variance, while PC2 through PC12 each explain approximately 7% of the variance (ranging from 7.34% to 5.77%). This fairly uniform distribution after PC1 suggests that the variation in CBC measurements is spread across many dimensions rather than dominated by a few factors, reflecting the complexity and relative independence of different blood cell types and their characteristics.
+
+------------------------------------------------------------------------
+
+Scree plot
+
+```{r}
+plot(pca_result, type = "l", main = "Scree Plot")
+```
+
+The scree plot shows a modest drop from PC1 to PC2, followed by a remarkably flat plateau where PC2 through PC12 each contribute roughly 7% of the variance. This pattern indicates that after the first component, no single dimension stands out as particularly important, and the remaining variance is distributed almost evenly across the other components.
+
+------------------------------------------------------------------------
+
+Biplot
+
+```{r}
+biplot(pca_result, scale = 0)
+```
+
+The biplot shows how the original CBC variables load onto the first two principal components and reveals clustering patterns among patients. Variables pointing in similar directions are positively correlated (e.g., RBC_Count, Hemoglobin, and Hematocrit), while those pointing in opposite directions are negatively correlated, helping us identify which measurements drive the main sources of variation.
+
+------------------------------------------------------------------------
+
+Variance explained
+
+```{r}
+var_explained <- (pca_result$sdev^2) / sum(pca_result$sdev^2)
+```
+
+Cumulative proportion
+
+```{r}
+cumsum(var_explained) 
+```
+
+The cumulative proportion indicates that we need approximately 10 components to explain 80% of the variance and 12 components to reach 92%. While this means we cannot drastically reduce dimensionality without losing information, focusing on the first 5-6 components (capturing around 45-52% of variance) still provides valuable insight into the major patterns of variation while simplifying subsequent analyses.
+
+------------------------------------------------------------------------
+
+[Conclusion for 1st question]{.underline}
+
+**Can a small number of principal components summarize most of the variation in the CBC variables?**
+
+-   While PC1 captures the largest share of variance (16.25%), the remaining components contribute roughly equally (around 7% each), requiring approximately 10-11 components to reach 80% cumulative variance.
+
+-   This suggests that CBC measurements represent relatively independent physiological processes that do not reduce neatly into just a few underlying dimensions. Our CBC panel reflects the multidimensional complexity of hematological profiles in autoimmune disease patients. Having explored the structure of the CBC data, we now turn to our second research question: modeling ESR as a function of other clinical and demographic variables using multiple linear regression.
+
+## Multiple Linear Regression: Modeling ESR
+
+Having examined the structure of CBC measurements, we now turn to modeling the Erythrocyte Sedimentation Rate (ESR), a key inflammation marker commonly elevated in autoimmune diseases.
+
+-   ESR is clinically valuable for monitoring disease activity, but it can be influenced by multiple demographic and laboratory factors. We use multiple linear regression to identify which variables are most strongly associated with ESR levels, allowing us to understand the clinical and biological factors that drive this important inflammation marker.
+
+We built a multiple linear regression model with ESR as the response variable and included the following predictors: Age, Gender, Sickness Duration (in months), CRP (another inflammation marker), and several CBC measurements including RBC Count, Hemoglobin, WBC Count, Neutrophils, and Lymphocytes. We removed observations with missing ESR values to ensure complete case analysis.
+
+------------------------------------------------------------------------
+
+Remove missing ESR values if there are any
+
+```{r}
+auto_reg <- auto_sel[!is.na(auto_sel$ESR), ]
+```
+
+Build regression model
+
+```{r}
+esr_model <- lm(ESR ~ Age + Gender + Sickness_Duration_Months + 
+                CRP + RBC_Count + Hemoglobin + WBC_Count + 
+                Neutrophils + Lymphocytes, 
+                data = auto_reg)
+```
+
+Summary of the model
+
+```{r}
+summary(esr_model)
+```
+
+We performed a multiple linear regression to predict ESR levels using demographic and clinical variables. The model output indicates that the regression is statistically significant overall, with a p-value less than 2.2e-16 and an F-statistic of 533.6.
+
+However, the Multiple R-squared value is 0.2851, meaning the model explains only about 28.5% of the variability in ESR data. We know this since Multiple R-Squared represents the proportion of variance in a dependent variable that is predictable from multiple independent variables in a regression model
+
+Looking at the **individual coefficients**,
+
+-   Sickness Duration and CRP are positive predictors because they serve as direct measures of disease progression and inflammation, meaning they naturally rise alongside ESR.
+
+-   Conversely, RBC Count and Hemoglobin act as negative predictors, reflecting an inverse relationship where high inflammation (high ESR) is associated with lower blood counts.
+
+-   Age and Gender likely appear **statistically insignificant** because the specific biological markers (like CRP and blood counts) are much stronger predictors of the condition; once the model accounts for these direct physiological variables, the demographic data provides no additional unique value in predicting ESR levels.
+
+------------------------------------------------------------------------
+
+Plots
+
+```{r}
+par(mfrow = c(2, 2))
+plot(esr_model)
+```
+
+The diagnostic plots reveal some issues with model assumptions: the Q-Q Residuals plot shows a deviation from the diagonal line (heavy tails), suggesting the data is not perfectly normally distributed, and the Residuals vs Fitted plot shows a curved pattern, indicating potential non-linearity.
+
+------------------------------------------------------------------------
+
+[Conclusion for 2nd question]{.underline}
+
+**Can we predict a key inflammation marker (ESR) using other clinical and demographic measurements?**
+
+-   The analysis confirms that ESR is significantly associated with other inflammatory markers like CRP and indicators of anemia (low RBC and Hemoglobin), which matches biological expectations. However, the relatively low R-squared value and the patterns in the diagnostic plots suggest that a linear model may not fully capture the complexity of ESR, and other unmeasured factors likely contribute to the variance, so **this model should not be relied upon for precise individual predictions or clinical decision-making.**
+
+-   Now that we have examined the relationships between specific clinical variables and inflammation, we will broaden our analysis to compare patient groups. This leads us to our next research question: Are there multivariate differences in key clinical measurements across different autoimmune diagnoses?
+
+## MANOVA: Comparing Autoimmune Groups
+
+To address our 3rd question: "Are there significant differences in the multivariate means of key clinical metrics between patients with different autoimmune diagnoses?"
+
+-   We will use Multivariate Analysis of Variance (MANOVA). This allows us to test whether the combined profile of blood metrics differs across the 8 diagnostic groups we created earlier.
+
+------------------------------------------------------------------------
+
+Before running the model, we check standard MANOVA assumptions, specifically multivariate normality and homogeneity of covariance matrices.
+
+install libraries needed
+
+```{r}
+library(MVN)
+library(biotools)
+```
+
+define variables needed
+
+```{r}
+blood_vars <- c("RBC_Count", "Hemoglobin", "Hematocrit", 
+                "MCV", "MCH", "WBC_Count", "PLT_Count")
+```
+
+Subset data for MANOVA (removing NAs for these specific columns, if there are any)
+
+```{r}
+auto_manova <- na.omit(auto_sel[, c("Diagnosis_Group", blood_vars)])
+```
+
+Check Homogeneity of Covariance Matrices (Box's M Test)
+
+```{r}
+box_result <- boxM(auto_manova[, blood_vars], auto_manova$Diagnosis_Group)
+print(box_result)
+```
+
+Check Multivariate Normality
+
+```{r}
+mvn_result <- mvn(data = auto_manova, subset = "Diagnosis_Group")
+print(mvn_result$multivariateNormality)
+```
+
+Assumptions for MANOVA were checked. Box's M test was statistically significant (p \< 2.2e-16), indicating a violation of the homogeneity of covariance matrices assumption. Additionally, formal tests for multivariate normality returned NULL outcomes due to the large sample size (N \> 12,000) exceeding the computational limits of standard Shapiro-Wilk implementations. However, given the extremely large sample size, we rely on the Central Limit Theorem, which renders MANOVA robust to these specific violations.
+
+------------------------------------------------------------------------
+
+Now let's dive into the MANOVA
+
+Ensure Diagnosis_Group is a factor
+
+```{r}
+auto_manova$Diagnosis_Group <- as.factor(auto_manova$Diagnosis_Group)
+```
+
+Run the MANOVA - use cbind() to group all blood variables on the left side
+
+```{r}
+manova_model <- manova(cbind(RBC_Count, Hemoglobin, Hematocrit, 
+                             MCV, MCH, WBC_Count, PLT_Count) ~ Diagnosis_Group, 
+                       data = auto_manova)
+```
+
+summary using Wilks'
+
+```{r}
+summary(manova_model, test = "Wilks")
+```
+
+------------------------------------------------------------------------
+
+Now let's shift over to the UNIVARIATE
+
+Run individual linear models for each variable
+
+```{r}
+fit_RBC  <- anova(lm(RBC_Count ~ Diagnosis_Group, data = auto_manova))
+fit_Hgb  <- anova(lm(Hemoglobin ~ Diagnosis_Group, data = auto_manova))
+fit_Hct  <- anova(lm(Hematocrit ~ Diagnosis_Group, data = auto_manova))
+fit_MCV  <- anova(lm(MCV ~ Diagnosis_Group, data = auto_manova))
+fit_MCH  <- anova(lm(MCH ~ Diagnosis_Group, data = auto_manova))
+fit_WBC  <- anova(lm(WBC_Count ~ Diagnosis_Group, data = auto_manova))
+fit_PLT  <- anova(lm(PLT_Count ~ Diagnosis_Group, data = auto_manova))
+```
+
+Extract P-values manually
+
+```{r}
+p_values <- c(
+  fit_RBC$`Pr(>F)`[1],
+  fit_Hgb$`Pr(>F)`[1],
+  fit_Hct$`Pr(>F)`[1],
+  fit_MCV$`Pr(>F)`[1],
+  fit_MCH$`Pr(>F)`[1],
+  fit_WBC$`Pr(>F)`[1],
+  fit_PLT$`Pr(>F)`[1]
+)
+```
+
+Assign names to the values
+
+```{r}
+names(p_values) <- c("RBC_Count", "Hemoglobin", "Hematocrit", 
+                     "MCV", "MCH", "WBC_Count", "PLT_Count")
+```
+
+Apply Bonferroni Correction. We have 7 tests, so we adjust the p-values
+
+```{r}
+bonferroni_threshold <- 0.05 / 7
+adjusted_p <- p.adjust(p_values, method = "bonferroni")
+```
+
+creating a table to store
+
+```{r}
+results_table <- data.frame(
+  Original_p = round(p_values, 5),
+  Bonferroni_p = round(adjusted_p, 5),
+  Significant = ifelse(adjusted_p < 0.05, "Yes", "No")
+)
+print(results_table)
+```
+
+After applying the Bonferroni correction to adjust for multiple testing, only RBC Count, Hemoglobin, and Hematocrit remained statistically significant (p \< 0.05). Other variables like WBC Count and PLT Count, which showed marginal significance originally, were found to be non-significant after correction, indicating they are not reliable differentiators between these diagnostic groups.
+
+------------------------------------------------------------------------
+
+Now let's do some plotting.
+
+import some libraries
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+```
+
+Boxplot 1 for RBC Count
+
+```{r}
+plot_rbc <- ggplot(auto_manova, 
+                   aes(x = Diagnosis_Group, y = RBC_Count, fill = Diagnosis_Group)) +
+  geom_boxplot() +
+  labs(title = "RBC Count by Group", x = "", y = "Million cells/uL") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), legend.position = "none")
+```
+
+Boxplot 2 for HGB
+
+```{r}
+plot_hgb <- ggplot(auto_manova, 
+                   aes(x = Diagnosis_Group, y = Hemoglobin, fill = Diagnosis_Group)) +
+  geom_boxplot() +
+  labs(title = "Hemoglobin by Group", x = "", y = "g/dL") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), legend.position = "none")
+```
+
+Boxplot 3 for Hematocrit
+
+```{r}
+plot_hct <- ggplot(auto_manova, 
+                   aes(x = Diagnosis_Group, y = Hematocrit, fill = Diagnosis_Group)) +
+  geom_boxplot() +
+  labs(title = "Hematocrit by Group", x = "Diagnosis Group", y = "%") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+```
+
+Display all plots!
+
+```{r}
+grid.arrange(plot_rbc, plot_hgb, plot_hct, nrow = 3)
+```
+
+The plots visually confirm the results from our statistical tests. Across all three significant variables, RBC Count, Hemoglobin, and Hematocrit, the Normal control group (shown in blue) consistently exhibits higher median values compared to every autoimmune disease category. While the various disease groups (such as Rheumatological, Vasculitis, and Neurological) show relatively similar and lower ranges, the healthy control group stands out with distinctly healthier red blood cell profiles. This visual separation strongly supports the conclusion that anemia and reduced blood cell metrics are a distinguishing feature separating healthy individuals from those with active autoimmune disorders.
+
+------------------------------------------------------------------------
+
+Our analysis confirms that patients with different autoimmune diagnoses have distinct hematological profiles compared to healthy individuals, largely driven by differences in red blood cell health rather than immune cell counts. Specifically, the data shows that anemia-related metrics like Hemoglobin and RBC Count are the primary factors separating healthy controls from those with active disease, while white blood cell counts remain relatively similar across groups.
+
+Having established how clinical profiles vary by disease type, we now turn our attention to demographic factors to answer our final research question: Are there significant differences in the multivariate means of key clinical metrics between male and female patients?
+
+## Inference for Multivariate Means: Comparing Mean Vectors by Gender
+
+To address the 4th question: "Are there significant differences in the multivariate means of key clinical metrics between male and female patients?"
+
+-   We will use Hotelling's T\^2. This allows us to test whether the mean vectors of clinical metrics between male and female patients are different.
+
+------------------------------------------------------------------------
+
+First, let's create the statistical hypotheses.
+
+Null Hypothesis: $\mu_{male}$ = $\mu_{female}$
+
+-   There is no significant difference in the combined profile of clinical metrics between males and females.
+
+Alternative Hypothesis: $\mu_{male} \neq \mu_{female}$
+
+-   There is a significant difference in the mean vectors.
+
+------------------------------------------------------------------------
+
+Next, we need to prepare the data to run the test. We will choose the clinical variables from the data set, excluding the categorical variables and other non-clinical metrics (age, duration)
+
+```{r}
+clinical_vars <- c("ESR", "CRP", "ANA", "C3", "C4", "RBC_Count", 
+                   "Hemoglobin", "Hematocrit", "MCV", "MCH", "MCHC", 
+                   "RDW", "WBC_Count", "PLT_Count", "Neutrophils", 
+                   "Lymphocytes", "Monocytes", "Eosinophils", "Basophils")
+
+```
+
+Then, split the data by gender
+
+```{r}
+males <- subset(Autoimmune_Disorder_Dataset, Gender == "Male", select = clinical_vars)
+females <- subset(Autoimmune_Disorder_Dataset, Gender == "Female", select = clinical_vars)
+```
+
+------------------------------------------------------------------------
+
+Before running the test, we must check the assumptions for the Hotelling's T\^2 test.
+
+Assumptions:
+
+1.  Multivariate Normality: Since the data set has 12,500 samples, we can apply the central limit theorem
+2.  Homogeneity of Covariance Matrices: Assume common variance-covariance matrix between the two groups
+
+Load libraries
+
+```{r}
+library(biotools)
+library(MVN)
+library(gridExtra)
+```
+
+Check Homogeneity of Covariance Matrices (Box's M Test)
+
+```{r}
+box_m <- boxM(Autoimmune_Disorder_Dataset[, clinical_vars], Autoimmune_Disorder_Dataset$Gender)
+print(box_m)
+```
+
+Check Multivariate Normality
+
+```{r}
+mvn_males <- mvn(data = males, mvn_test = "hz")
+summary(mvn_males)
+```
+
+```{r}
+mvn_females <- mvn(data = females, mvn_test = "hz")
+summary(mvn_females)
+```
+
+Check Chi-Square Q-Q plots
+
+```{r}
+males_plot <- multivariate_diagnostic_plot(males, type = "qq")
+females_plot <- multivariate_diagnostic_plot(females, type = "qq")
+
+grid.arrange(males_plot, females_plot, nrow = 2)
+```
+
+The Box's M test indicated a significantly significant difference in the covariance matrices (p = 0.0422 \< α = 0.05) . However, Box's M is sensitive to large sample sizes. But because the group sizes are nearly equal, Hotelling's T\^2 still works despite this violation.
+
+While the tests rejected Multivariate Normality (MVN) for both data subsets, Chi-Square Q-Q plots revealed only the tails diverge, with the central data distributions following linearity. Given the large sample size of males (6,316) and females (6,184), we can apply Central Limit Theorem, ensuring the sampling distribution of of the mean vectors will be approximately normal.
+
+------------------------------------------------------------------------
+
+Now, we can run the Hotelling's T\^2 test.
+
+```{r}
+library(Hotelling)
+t2_test <- hotelling.test(males, females)
+print(t2_test)
+```
+
+After running Hotelling's T\^2 test, the difference between the male and female mean vectors is statistically insignificant (p = 0.2503 \> α = 0.05). This means that we fail to reject the null hypothesis. This means that within this autoimmune population, the clinical profiles of male and female patients are statistically similar. Even though the multivariate test was non-significant, lets run Univariate T-tests for red blood cell count (RBC), hemoglobin (Hgb), and erythrocyte sedimentation rate (ESR). Typically, RBC and Hgb are higher in men due to testosterone promoting red blood cell production. Females typically have a higher ESR since they have a lower RBC.
+
+```{r}
+Hgb_t.test <- t.test(Hemoglobin ~ Gender, data = Autoimmune_Disorder_Dataset)
+print(Hgb_t.test)
+
+RBC_t.test <- t.test(RBC_Count ~ Gender, data = Autoimmune_Disorder_Dataset)
+print(RBC_t.test)
+
+ESR_t.test <- t.test(ESR ~ Gender, data = Autoimmune_Disorder_Dataset)
+print(ESR_t.test)
+```
+
+Density plots for the three clinical factors
+
+```{r}
+library(GGally)
+
+ggplot(Autoimmune_Disorder_Dataset, aes(x = Hemoglobin, fill = Gender)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_grey() + 
+  theme_classic() +
+  ggtitle("Density Plot: Hemoglobin Distribution by Gender")
+
+ggplot(Autoimmune_Disorder_Dataset, aes(x = RBC_Count, fill = Gender)) +
+  geom_density(alpha = 0.5) + 
+  scale_fill_grey() + 
+  theme_classic() +
+  ggtitle("Density Plot: RBC Count Distribution by Gender")
+
+ggplot(Autoimmune_Disorder_Dataset, aes(x = ESR, fill = Gender)) +
+  geom_density(alpha = 0.5) +
+  scale_fill_grey() + 
+  theme_classic() +
+  ggtitle("Density Plot: ESR Distribution by Gender")
+
+```
+
+Observing the density plots of ESR, Hemoglobin, and RBC, we can see there is almost a complete overlap between males and females. Also, he spread of the data is almost indistinguishable. This evidence aligns with our non-significant statistical findings from the Hotelling's T\^2 test, and this further suggests that the expected differences in clinical profiles between genders does not exist in this data set.
+
+After running each Univariate T-test, all of the p-values indicated that the difference between the means for each group were statistically insignificant, mirroring the results of the Hotelling's T\^2 test. This indicates for this population, the diseases have equalized RBC, Hgb, and ESR between genders. Because of this result, the next phase of analysis will focus on investigating the interactions between gender and diagnosis more specifically focusing on the means of the "Normal" (healthy) patients.
+
+<https://medlineplus.gov/ency/article/003644.htm>
+
+<https://my.clevelandclinic.org/health/symptoms/17705-low-hemoglobin>
+
+```{r}
+library(ggplot2)
+
+vars_to_keep <- c("Diagnosis_Group", "RBC_Count", "ESR", "Hemoglobin")
+
+males_group <- subset(Autoimmune_Disorder_Dataset_Grouped, Gender == "Male", select = vars_to_keep)
+females_group <- subset(Autoimmune_Disorder_Dataset_Grouped, Gender == "Female", select = vars_to_keep)
+
+male_means <- aggregate(. ~ Diagnosis_Group, data = males_group, mean, na.rm = TRUE)
+female_means <- aggregate(. ~ Diagnosis_Group, data = females_group, mean, na.rm = TRUE)
+
+male_means$Gender <- "Male"
+female_means$Gender <- "Female"
+combined_data <- rbind(male_means, female_means)
+combined_data <- combined_data[,c(1,5,2,4,3)]
+
+combined_data
+```
+
+When inspecting the means of each of the three clinical factors, males had a mean RBC of 4.45 million cells/microliter (cells/mcL) and females had a mean of 4.44 million cells/mcL. According to MedlinePlus, normal RBC for males ranges from 4.7 to 6.1 million cells/mcL, while RBC for females ranges from 4.2 to 5.4 million cells/mcL. When inspecting the means of the "Normal" male and female groups, both almost have an identical mean of about 5.2 million cells/mcL.
+
+Similarly, hemoglobin concentration is expected to differ between genders. Accoridng to Cleveland Clinic, for males, a normal level ranges between 14.0 grams per deciliter (gm/dL) and 17.5 gm/dL. For females, a normal level ranges between 12.3 gm/dL and 15.3 gm/dL. However in this data set, both means for the "Normal" males and females groups have a nearly identical mean of 15.5 gm/dL.\
+\
+These findings continue to reinforce the evidence from the Hotelling's T\^2 test. It appears for these clinical metrics that there is no significant difference between genders. ESR is also similar between males and females, which explains why gender was not a significant predictor for our regression model.
